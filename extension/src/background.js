@@ -18,6 +18,8 @@ import { probeCrowdmark } from "./data/crowdmark-probe.js";
 import { crowdmarkAllowed, crowdmarkBase, crowdmarkSubmitted, readCrowdmark } from "./data/crowdmark-source.js";
 import { updateCalendarState } from "./core/store.js";
 import { CALENDAR_ALARM, connectCalendar, requestCalendarSync, runCalendarSync, resumeCalendarSync, recoverCalendarSync, stopCalendarSync } from "./calendar/calendar-sync.js";
+import { parseOutline } from "./data/outline-parser.js";
+import { scanCourseOutline } from "./data/outline-fetcher.js";
 
 const BADGE_BG = "#FFE45C";
 const BADGE_TEXT = "#17181C";
@@ -576,6 +578,10 @@ function mergeLive(prevItems, fresh, { failed, readOk, courseIds }, now = new Da
   const freshIds = new Set(fresh.map((f) => f.id));
   for (const p of prevItems || []) {
     if (freshIds.has(p.id) || !courseIds.has(p.courseId)) continue;
+    if (p.seenIn?.includes("outline") || p.source === "outline") {
+      items.push(p);
+      continue;
+    }
     const ok = readOk.get(p.courseId);
     const from = p.seenIn && p.seenIn.length ? p.seenIn : ALL_SOURCES;
     const gone = !failed.has(p.courseId) && ok && from.every((x) => ok.has(x));
@@ -1509,6 +1515,57 @@ async function handle(msg, sender) {
     case "settings:changed":
       await scheduleReminders();
       return { ok: true };
+    case "outline:parse-text": {
+      const st = await getState();
+      const course = st.courses.find((c) => c.id === msg.courseId) || { id: msg.courseId || "custom", code: "" };
+      const existing = st.items.filter((i) => i.courseId === course.id);
+      const items = parseOutline(msg.text, {
+        course,
+        existingItems: existing,
+        defaultYear: new Date().getFullYear(),
+      });
+      return { ok: true, items };
+    }
+    case "outline:scan-course": {
+      const st = await getState();
+      const settings = await getSettings();
+      const course = st.courses.find((c) => c.id === msg.courseId);
+      if (!course) return { ok: false, reason: "Course not found" };
+      const source = createSource(settings, getCatalog, { relay: relayFetch });
+      const existing = st.items.filter((i) => i.courseId === course.id);
+      const result = await scanCourseOutline(source, course, existing);
+      return { ok: true, ...result };
+    }
+    case "outline:add-items": {
+      const itemsToAdd = Array.isArray(msg.items) ? msg.items : [];
+      if (!itemsToAdd.length) return { ok: true, added: 0 };
+      await mutate((st) => {
+        const existingIds = new Set(st.items.map((i) => i.id));
+        for (const item of itemsToAdd) {
+          if (!existingIds.has(item.id)) {
+            st.items.push(item);
+            existingIds.add(item.id);
+          }
+        }
+        st.seq += 1;
+        st.lastEvent = { type: "outline-added", count: itemsToAdd.length, seq: st.seq, at: nowIso() };
+      });
+      await refreshBadge();
+      await scheduleReminders();
+      await requestCalendarSync().catch(() => {});
+      return { ok: true, added: itemsToAdd.length };
+    }
+    case "item:delete": {
+      await mutate((st) => {
+        st.items = st.items.filter((i) => i.id !== msg.itemId);
+        st.seq += 1;
+        st.lastEvent = { type: "item-deleted", itemId: msg.itemId, seq: st.seq, at: nowIso() };
+      });
+      await refreshBadge();
+      await scheduleReminders();
+      await requestCalendarSync().catch(() => {});
+      return { ok: true };
+    }
     default:
       return { ok: false, reason: "unknown message" };
   }

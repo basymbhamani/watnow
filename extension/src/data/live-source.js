@@ -1182,7 +1182,7 @@ export class LiveSource {
    * One of Learn's own pages as plain text, or null when it can't be read.
    * Only the worker reads pages; a tab relay only carries /d2l/api/ requests.
    */
-  async pageText(path, via) {
+  async pageText(path, via = this.via || "worker") {
     if (via !== "worker") return null;
     const gap = GAP_MS - (Date.now() - this.lastAt);
     if (gap > 0) await wait(gap);

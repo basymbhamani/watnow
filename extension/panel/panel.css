@@ -1288,3 +1288,182 @@ html:not(.is-animating) .is-moved:not(.is-travelling) {
     opacity: 0.5;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Course Outline Modal                                                */
+/* ------------------------------------------------------------------ */
+
+.outline-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+  backdrop-filter: blur(2px);
+}
+
+.outline-card {
+  background: var(--sheet);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  width: 100%;
+  max-width: 360px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--clay-md);
+  color: var(--ink);
+}
+
+.outline-card-header {
+  margin-bottom: 12px;
+}
+
+.outline-card-title {
+  font-size: var(--text-base);
+  font-weight: var(--weight-bold);
+  margin: 0 0 4px;
+  color: var(--ink);
+}
+
+.outline-card-sub {
+  font-size: var(--text-xs);
+  color: var(--ink-muted);
+  margin: 0;
+}
+
+.outline-card-body {
+  overflow-y: auto;
+  flex: 1;
+  margin-bottom: 12px;
+  padding-right: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.outline-item-card {
+  background: var(--tile);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.outline-item-check {
+  margin-top: 3px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.outline-item-fields {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.outline-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 8px;
+  font-size: var(--text-xs);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--sheet);
+  color: var(--ink);
+  font-family: inherit;
+}
+
+.outline-row-meta {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.outline-row-meta input,
+.outline-row-meta select {
+  padding: 4px 6px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--sheet);
+  color: var(--ink);
+  font-family: inherit;
+}
+
+.outline-item-loc {
+  font-size: 10px;
+  color: var(--ink-muted);
+}
+
+.outline-dup-badge {
+  font-size: 10px;
+  color: var(--ink-muted);
+  font-style: italic;
+  display: block;
+}
+
+.outline-paste-toggle {
+  background: none;
+  border: none;
+  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  padding: 6px 0;
+  text-decoration: underline;
+  text-align: left;
+}
+
+.outline-paste-toggle:hover {
+  color: var(--ink);
+}
+
+.outline-paste-box {
+  width: 100%;
+  height: 90px;
+  font-size: var(--text-xs);
+  font-family: inherit;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--sheet);
+  color: var(--ink);
+  box-sizing: border-box;
+  resize: vertical;
+  margin-top: 4px;
+}
+
+.outline-modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.outline-scan-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: var(--text-xs);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--sheet);
+  color: var(--ink);
+  cursor: pointer;
+  margin-top: 6px;
+}
+
+.outline-scan-btn:hover {
+  background: var(--tile-hover);
+}
+

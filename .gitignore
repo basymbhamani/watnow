@@ -1,3 +1,7 @@
 dist/
 node_modules/
 .DS_Store
+
+# Course outline fixtures & downloads
+test/fixtures/outlines/
+*.pdf

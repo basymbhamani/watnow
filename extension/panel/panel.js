@@ -156,7 +156,8 @@ function renderBar() {
   const calendarBtn = calendarButtonHTML(scan);
   // Google Calendar sync has its own button when it's set up, so the export one only shows without it.
   const exportBtn = PREVIEW || scan !== "done" || calendarBtn ? "" : `<button class="icon-btn" data-act="cal-export-open" aria-label="Export deadlines to your calendar">${icon("calendar-add")}</button>`;
-  if (cmBtn || calendarBtn || exportBtn) status = "";
+  const outlineBtn = PREVIEW || scan !== "done" ? "" : `<button class="icon-btn" data-act="outline-open" aria-label="Import from course outline">${icon("doc", 18)}</button>`;
+  if (cmBtn || calendarBtn || exportBtn || outlineBtn) status = "";
   bar.innerHTML = `
     <div class="brand"><span class="mark-tile">${brandMark(24)}</span><span class="brand-name">${esc(APP)}</span></div>
     <span class="spacer"></span>
@@ -164,6 +165,7 @@ function renderBar() {
     ${cmBtn}
     ${calendarBtn}
     ${exportBtn}
+    ${outlineBtn}
     ${refresh}
     <button class="icon-btn" data-act="settings" aria-label="Reminders and settings">${icon("gear")}</button>`;
 }
@@ -255,6 +257,360 @@ async function connectCrowdmark() {
 }
 
 window.addEventListener("scroll", () => bar.classList.toggle("is-scrolled", window.scrollY > 4), { passive: true });
+
+/* ------------------------------------------------------------------ */
+/* Course outline modal                                                */
+/* ------------------------------------------------------------------ */
+
+let outlineModalState = {
+  open: false,
+  courseId: "",
+  scanning: false,
+  scanMessage: "",
+  pasting: false,
+  pasteText: "",
+  candidates: [],
+};
+
+function toLocalDateInput(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const yr = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${yr}-${mo}-${day}`;
+}
+
+function toLocalTimeInput(iso) {
+  if (!iso) return "23:59";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "23:59";
+  const hr = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+  return `${hr}:${min}`;
+}
+
+function fromLocalDateAndTime(dateVal, timeVal) {
+  if (!dateVal) return new Date().toISOString();
+  const parts = dateVal.split("-").map(Number);
+  const y = parts[0];
+  const m = parts[1];
+  const d = parts[2];
+  let hr = 23;
+  let min = 59;
+  if (timeVal) {
+    const tParts = timeVal.split(":").map(Number);
+    if (!isNaN(tParts[0])) hr = tParts[0];
+    if (!isNaN(tParts[1])) min = tParts[1];
+  }
+  return new Date(y, m - 1, d, hr, min, 0).toISOString();
+}
+
+function syncModalStateFromDOM() {
+  const modal = document.getElementById("outline-modal");
+  if (!modal) return;
+  const pasteBox = modal.querySelector("#outline-paste-input");
+  if (pasteBox) outlineModalState.pasteText = pasteBox.value;
+
+  const rows = modal.querySelectorAll(".outline-item-card");
+  rows.forEach((row) => {
+    const idx = parseInt(row.dataset.idx, 10);
+    const c = outlineModalState.candidates[idx];
+    if (!c) return;
+    const chk = row.querySelector(".outline-item-check");
+    if (chk) c.selected = chk.checked;
+    const titleEl = row.querySelector('[data-field="title"]');
+    if (titleEl) c.title = titleEl.value.trim();
+    const catEl = row.querySelector('[data-field="category"]');
+    if (catEl) {
+      c.category = catEl.value;
+      c.kind = catEl.value;
+    }
+    const dateEl = row.querySelector('[data-field="date"]');
+    const timeEl = row.querySelector('[data-field="time"]');
+    if (dateEl && dateEl.value) {
+      c.dueAt = fromLocalDateAndTime(dateEl.value, timeEl ? timeEl.value : "");
+    }
+  });
+}
+
+function updateOutlineSaveButton() {
+  const modal = document.getElementById("outline-modal");
+  if (!modal) return;
+  const saveBtn = modal.querySelector('[data-act="outline-save"]');
+  if (!saveBtn) return;
+  const count = outlineModalState.candidates.filter((c) => c.selected && c.title).length;
+  saveBtn.textContent = `Add to WATnow (${count})`;
+  saveBtn.disabled = count === 0;
+}
+
+function renderOutlineModal() {
+  let modal = document.getElementById("outline-modal");
+  if (!outlineModalState.open) {
+    if (modal) modal.remove();
+    return;
+  }
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "outline-modal";
+    modal.className = "outline-backdrop";
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-modal", "true");
+    modal.setAttribute("aria-labelledby", "outline-title");
+    document.body.appendChild(modal);
+  }
+
+  const courses = state.courses || [];
+  const currentCourse = courses.find((c) => c.id === outlineModalState.courseId) || courses[0];
+  if (currentCourse && outlineModalState.courseId !== currentCourse.id) {
+    outlineModalState.courseId = currentCourse.id;
+  }
+
+  const courseOptions = courses.length
+    ? courses.map((c) => `<option value="${esc(c.id)}" ${c.id === outlineModalState.courseId ? "selected" : ""}>${esc(c.code)}${c.name ? ` - ${esc(c.name)}` : ""}</option>`).join("")
+    : `<option value="">No courses available</option>`;
+
+  const selectedCount = outlineModalState.candidates.filter((c) => c.selected && c.title).length;
+  const existingOutlineItems = (state.items || []).filter(
+    (i) => i.courseId === outlineModalState.courseId && (i.seenIn?.includes("outline") || i.source === "outline" || i.id.startsWith("outline:"))
+  );
+
+  const candidatesHTML = outlineModalState.candidates.length
+    ? outlineModalState.candidates.map((c, idx) => {
+        const dateStr = toLocalDateInput(c.dueAt);
+        const timeStr = toLocalTimeInput(c.dueAt);
+        const isChecked = c.selected !== false && !c.isDuplicate;
+        return `
+        <div class="outline-item-card" data-idx="${idx}">
+          <input type="checkbox" class="outline-item-check" data-field="selected" data-idx="${idx}" ${isChecked ? "checked" : ""} aria-label="Select ${esc(c.title)}">
+          <div class="outline-item-fields">
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input type="text" class="outline-input" data-field="title" data-idx="${idx}" value="${esc(c.title)}" placeholder="Assessment title">
+              <button class="icon-btn" data-act="outline-remove-candidate" data-idx="${idx}" aria-label="Remove item" title="Remove item" style="padding:2px;flex-shrink:0;">${icon("x", 14)}</button>
+            </div>
+            <div class="outline-row-meta">
+              <input type="date" data-field="date" data-idx="${idx}" value="${dateStr}" aria-label="Due date">
+              <input type="time" data-field="time" data-idx="${idx}" value="${timeStr}" aria-label="Due time">
+              <select data-field="category" data-idx="${idx}" aria-label="Category">
+                <option value="quiz" ${c.category === "quiz" ? "selected" : ""}>Quiz / Exam</option>
+                <option value="lab" ${c.category === "lab" ? "selected" : ""}>Lab / Practical</option>
+                <option value="assignment" ${c.category === "assignment" ? "selected" : ""}>Assignment / Project</option>
+                <option value="discussion" ${c.category === "discussion" ? "selected" : ""}>Discussion</option>
+                <option value="content" ${c.category === "content" ? "selected" : ""}>Content / Task</option>
+              </select>
+              ${c.location ? `<span class="outline-item-loc">${esc(c.location)}</span>` : ""}
+              ${c.weight ? `<span class="outline-item-loc">(${esc(c.weight)})</span>` : ""}
+            </div>
+            ${c.isDuplicate ? `<span class="outline-dup-badge">${icon("alert", 12)} Already on ${esc(lms())} (matches ${esc(c.duplicateOf || "item")})</span>` : ""}
+          </div>
+        </div>`;
+      }).join("")
+    : `<div style="text-align:center;padding:16px 8px;color:var(--ink-muted);font-size:12px;">
+         <p style="margin:0 0 6px;">No outline items detected yet.</p>
+         <p style="margin:0;font-size:11px;">Select <strong>Scan ${esc(lms())}</strong> or paste your outline text above.</p>
+       </div>`;
+
+  const existingHTML = existingOutlineItems.length
+    ? `<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);">
+         <p style="font-size:11px;font-weight:600;color:var(--ink-muted);margin:0 0 6px;">Imported from outline (${existingOutlineItems.length}):</p>
+         <div style="display:flex;flex-direction:column;gap:6px;">
+           ${existingOutlineItems.map((item) => `
+             <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 8px;background:var(--tile);border-radius:4px;font-size:11px;">
+               <div style="display:flex;align-items:center;gap:6px;overflow:hidden;">
+                 ${icon(CATEGORY_ICON[item.category] || "doc", 14)}
+                 <span style="font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(item.title)}</span>
+                 <span style="color:var(--ink-muted);font-size:10px;">${esc(fmtDate(new Date(item.dueAt)))}</span>
+               </div>
+               <button class="icon-btn" data-act="outline-delete-existing" data-id="${esc(item.id)}" aria-label="Delete ${esc(item.title)}" title="Delete item" style="padding:2px;color:var(--ink-muted);">
+                 ${icon("trash", 14)}
+               </button>
+             </div>
+           `).join("")}
+         </div>
+       </div>`
+    : "";
+
+  modal.innerHTML = `
+    <div class="outline-card">
+      <div class="outline-card-header">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <h2 id="outline-title" class="outline-card-title">Course Outline Import</h2>
+          <button class="icon-btn" data-act="outline-cancel" aria-label="Close dialog" style="margin:-4px -4px 0 0;">
+            ${icon("x", 16)}
+          </button>
+        </div>
+        <p class="outline-card-sub">Extract in-person midterms, tests, and labs from your syllabus.</p>
+
+        <div style="margin-top:10px;display:flex;gap:8px;align-items:center;">
+          <label for="outline-course-select" style="font-size:12px;font-weight:600;color:var(--ink-muted);">Course:</label>
+          <select id="outline-course-select" class="select" style="flex:1;padding:4px 8px;font-size:12px;">
+            ${courseOptions}
+          </select>
+        </div>
+
+        <div style="margin-top:10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          <button class="btn btn-primary btn-sm outline-scan-btn" data-act="outline-scan" ${outlineModalState.scanning ? "disabled" : ""}>
+            ${icon("refresh", 14, outlineModalState.scanning ? "spin" : "")}
+            <span>${outlineModalState.scanning ? "Scanning…" : `Scan ${esc(lms())}`}</span>
+          </button>
+          <button class="outline-paste-toggle" data-act="outline-toggle-paste">
+            ${outlineModalState.pasting ? "Hide text paste" : "Paste outline text"}
+          </button>
+        </div>
+
+        ${outlineModalState.pasting ? `
+          <div style="margin-top:8px;">
+            <textarea id="outline-paste-input" class="outline-paste-box" placeholder="Paste course outline schedule or assessment table text here…">${esc(outlineModalState.pasteText)}</textarea>
+            <div style="display:flex;justify-content:flex-end;margin-top:4px;">
+              <button class="btn btn-quiet btn-sm" data-act="outline-parse-paste">Parse text</button>
+            </div>
+          </div>
+        ` : ""}
+
+        ${outlineModalState.scanMessage ? `<p class="status-text" style="font-size:11px;margin:8px 0 0;color:var(--ink-muted);">${esc(outlineModalState.scanMessage)}</p>` : ""}
+      </div>
+
+      <div class="outline-card-body">
+        ${candidatesHTML}
+        ${existingHTML}
+      </div>
+
+      <div class="outline-modal-actions">
+        <button class="btn btn-quiet btn-sm" data-act="outline-add-manual">+ Add row</button>
+        <span style="flex:1;"></span>
+        <button class="btn btn-quiet btn-sm" data-act="outline-cancel">Cancel</button>
+        <button class="btn btn-primary btn-sm" data-act="outline-save" ${selectedCount === 0 ? "disabled" : ""}>
+          Add to WATnow (${selectedCount})
+        </button>
+      </div>
+    </div>`;
+}
+
+function openOutlineModal(courseId) {
+  const targetId = courseId || (filter !== "all" ? filter : (state.courses[0]?.id || ""));
+  outlineModalState = {
+    open: true,
+    courseId: targetId,
+    scanning: false,
+    scanMessage: "",
+    pasting: false,
+    pasteText: "",
+    candidates: [],
+  };
+  renderOutlineModal();
+}
+
+function closeOutlineModal() {
+  outlineModalState.open = false;
+  renderOutlineModal();
+}
+
+async function handleOutlineScan() {
+  if (!outlineModalState.courseId) return;
+  syncModalStateFromDOM();
+  outlineModalState.scanning = true;
+  outlineModalState.scanMessage = `Searching ${lms()} for outline…`;
+  renderOutlineModal();
+
+  const res = await send("outline:scan-course", { courseId: outlineModalState.courseId });
+  outlineModalState.scanning = false;
+
+  if (res && res.ok && res.items && res.items.length) {
+    outlineModalState.candidates = res.items.map((it) => ({ ...it, selected: !it.isDuplicate }));
+    outlineModalState.scanMessage = `Found ${res.items.length} item${res.items.length === 1 ? "" : "s"} in course outline.`;
+  } else if (res && res.found && !res.items?.length) {
+    outlineModalState.scanMessage = `Found course outline on ${lms()}, but no new in-person assessments were detected. Paste the evaluation table below.`;
+    outlineModalState.pasting = true;
+  } else {
+    outlineModalState.scanMessage = `Couldn't extract text from ${lms()} outline automatically. Paste the evaluation table or schedule below.`;
+    outlineModalState.pasting = true;
+  }
+  renderOutlineModal();
+}
+
+async function handleOutlineParsePaste() {
+  syncModalStateFromDOM();
+  const text = (outlineModalState.pasteText || "").trim();
+  if (!text) {
+    outlineModalState.scanMessage = "Please paste some outline or schedule text first.";
+    renderOutlineModal();
+    return;
+  }
+
+  const res = await send("outline:parse-text", { text, courseId: outlineModalState.courseId });
+  if (res && res.ok && res.items) {
+    if (!res.items.length) {
+      outlineModalState.scanMessage = "No dated assessments found in pasted text. Try pasting just the dates and assessment rows.";
+    } else {
+      outlineModalState.scanMessage = `Extracted ${res.items.length} assessment${res.items.length === 1 ? "" : "s"} from pasted text.`;
+      const seenIds = new Set(outlineModalState.candidates.map((c) => c.id));
+      for (const it of res.items) {
+        if (!seenIds.has(it.id)) {
+          outlineModalState.candidates.push({ ...it, selected: !it.isDuplicate });
+          seenIds.add(it.id);
+        }
+      }
+    }
+  } else {
+    outlineModalState.scanMessage = "Error parsing text.";
+  }
+  renderOutlineModal();
+}
+
+function handleOutlineAddManual() {
+  syncModalStateFromDOM();
+  const now = new Date();
+  const nextWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7, 19, 0);
+  outlineModalState.candidates.push({
+    id: `outline:${outlineModalState.courseId}:manual-${Date.now()}`,
+    courseId: outlineModalState.courseId,
+    kind: "quiz",
+    category: "quiz",
+    title: "Midterm Exam",
+    dueAt: nextWeek.toISOString(),
+    timeSpecified: true,
+    timeRaw: "7:00 PM",
+    location: "",
+    weight: "",
+    isDuplicate: false,
+    selected: true,
+  });
+  renderOutlineModal();
+}
+
+async function handleOutlineSave() {
+  syncModalStateFromDOM();
+  const toAdd = outlineModalState.candidates
+    .filter((c) => c.selected && c.title)
+    .map((c) => ({
+      id: c.id || `outline:${c.courseId}:${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      courseId: c.courseId,
+      kind: c.category || "quiz",
+      category: c.category || "quiz",
+      title: c.title,
+      dueAt: c.dueAt,
+      dueField: "event",
+      url: null,
+      status: "open",
+      completedAt: null,
+      moved: null,
+      seenIn: ["outline"],
+      source: "outline",
+      location: c.location || null,
+      weight: c.weight || null,
+    }));
+
+  if (!toAdd.length) {
+    announce("No items selected to add.");
+    return;
+  }
+
+  await send("outline:add-items", { items: toAdd });
+  closeOutlineModal();
+  announce(`Added ${toAdd.length} deadline${toAdd.length === 1 ? "" : "s"} from course outline.`);
+  if (view === "list") renderList();
+}
 
 /* ------------------------------------------------------------------ */
 /* First scan                                                          */
@@ -450,7 +806,7 @@ function renderList() {
     m.filterCourse && m.openInFilter === 0
       ? `<div class="empty" data-flip="empty">${icon("check", 22)}<h2>Nothing to hand in for ${esc(m.filterCourse.code)}.</h2><p>${
           m.groups.some((g) => g.id === "earlier") ? "Anything you already handed in is under Handed in earlier." : `New items show up here when your prof posts them on ${lms()}.`
-        }</p></div>`
+        }</p><button class="outline-scan-btn" data-act="outline-open" data-course="${esc(m.filterCourse.id)}">${icon("doc", 16)}Scan course outline</button></div>`
       : "";
 
   app.innerHTML = `
@@ -720,7 +1076,7 @@ function renderStateView(kind) {
       mark: icon("check", 24),
       title: `No deadlines on ${lms()} yet`,
       body: "Your courses are there, but none of them have dated items yet. When a prof posts something with a due date, it shows up here.",
-      action: "",
+      action: `<button class="btn btn-primary" data-act="outline-open">${icon("doc", 16)}Import from course outline</button>`,
     },
     deleted: {
       mark: icon("check", 24),
@@ -883,6 +1239,7 @@ function onState(next) {
     return;
   }
   renderBar();
+  if (outlineModalState.open) renderOutlineModal();
   const s = next.scan.status;
 
   if (s === "idle") {
@@ -984,6 +1341,9 @@ app.addEventListener("click", (e) => {
         url: settings && settings.mode === "live" ? (currentSchool(settings) ? homeUrl(currentSchool(settings)) : `${liveBase(settings)}/d2l/home`) : `${(settings && settings.learnBase) || "https://learn.uwaterloo.ca"}/d2l/home/`,
       });
       break;
+    case "outline-open":
+      openOutlineModal(t.dataset.course);
+      break;
   }
 });
 
@@ -1001,11 +1361,66 @@ bar.addEventListener("click", (e) => {
     else showCalendarOptIn();
   }
   if (t.dataset.act === "cal-export-open") openSettings().then(() => app.querySelector('[data-act="cal-export"]')?.focus());
+  if (t.dataset.act === "outline-open") openOutlineModal(filter !== "all" ? filter : undefined);
   if (t.dataset.act === "settings") (view === "settings" ? closeSettings() : openSettings());
   if (t.dataset.act === "back") closeSettings();
 });
 
 document.body.addEventListener("click", async (e) => {
+  if (e.target.classList.contains("outline-backdrop")) {
+    closeOutlineModal();
+    return;
+  }
+  const outlineAct = e.target.closest("[data-act]");
+  if (outlineAct) {
+    const act = outlineAct.dataset.act;
+    if (act === "outline-cancel") {
+      closeOutlineModal();
+      return;
+    }
+    if (act === "outline-scan") {
+      handleOutlineScan();
+      return;
+    }
+    if (act === "outline-toggle-paste") {
+      syncModalStateFromDOM();
+      outlineModalState.pasting = !outlineModalState.pasting;
+      renderOutlineModal();
+      return;
+    }
+    if (act === "outline-parse-paste") {
+      handleOutlineParsePaste();
+      return;
+    }
+    if (act === "outline-add-manual") {
+      handleOutlineAddManual();
+      return;
+    }
+    if (act === "outline-remove-candidate") {
+      syncModalStateFromDOM();
+      const idx = parseInt(outlineAct.dataset.idx, 10);
+      if (!isNaN(idx) && idx >= 0 && idx < outlineModalState.candidates.length) {
+        outlineModalState.candidates.splice(idx, 1);
+        renderOutlineModal();
+      }
+      return;
+    }
+    if (act === "outline-delete-existing") {
+      const itemId = outlineAct.dataset.id;
+      if (itemId) {
+        await send("item:delete", { itemId });
+        announce("Deleted item.");
+        renderOutlineModal();
+        if (view === "list") renderList();
+      }
+      return;
+    }
+    if (act === "outline-save") {
+      handleOutlineSave();
+      return;
+    }
+  }
+
   const optinBtn = e.target.closest("[data-calendar-optin]");
   if (optinBtn) {
     const act = optinBtn.dataset.calendarOptin;
@@ -1018,9 +1433,40 @@ document.body.addEventListener("click", async (e) => {
   }
 });
 
+document.body.addEventListener("change", (e) => {
+  if (e.target.id === "outline-course-select") {
+    syncModalStateFromDOM();
+    outlineModalState.courseId = e.target.value;
+    outlineModalState.candidates = [];
+    outlineModalState.scanMessage = "";
+    renderOutlineModal();
+    return;
+  }
+  if (e.target.matches(".outline-item-check")) {
+    const idx = parseInt(e.target.dataset.idx, 10);
+    if (outlineModalState.candidates[idx]) {
+      outlineModalState.candidates[idx].selected = e.target.checked;
+    }
+    updateOutlineSaveButton();
+    return;
+  }
+  if (e.target.matches('[data-field="category"]')) {
+    const idx = parseInt(e.target.dataset.idx, 10);
+    if (outlineModalState.candidates[idx]) {
+      outlineModalState.candidates[idx].category = e.target.value;
+      outlineModalState.candidates[idx].kind = e.target.value;
+    }
+    return;
+  }
+});
+
 // Hidden demo shortcuts. Chrome's own commands (manifest "commands") fire too;
 // the background ignores a duplicate within 700 ms.
 document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && outlineModalState.open) {
+    closeOutlineModal();
+    return;
+  }
   if (e.key === "Escape" && view === "settings") {
     closeSettings();
     return;

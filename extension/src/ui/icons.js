@@ -28,6 +28,8 @@ const P = {
   play: '<path d="M6.5 4.8v10.4l8.3-5.2z"/>',
   keyboard: '<rect x="2.8" y="5.5" width="14.4" height="9" rx="1.8"/><path d="M6 8.5h.05M9 8.5h.05M12 8.5h.05M15 8.5h.05"/><path d="M6.5 11.5h7"/>',
   external: '<path d="M11 3.5h5.5V9"/><path d="M16.5 3.5 9.5 10.5"/><path d="M14.5 12v2.7a1.8 1.8 0 0 1-1.8 1.8H5.3a1.8 1.8 0 0 1-1.8-1.8V7.3a1.8 1.8 0 0 1 1.8-1.8H8"/>',
+  x: '<path d="M5 5l10 10M15 5L5 15"/>',
+  trash: '<path d="M4 6h12M7 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m2 0v10a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>',
 };
 
 export const CATEGORY_ICON = {
