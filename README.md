@@ -74,7 +74,7 @@ Firefox for Android is not supported, because extensions cannot open a sidebar t
 This repo is public so you can read exactly what the extension does with your school account before you install it.
 
 - It reads your course site from inside your browser, using the session you're already signed in with. It never sees your password.
-- It only sends GET requests: to your school's `/d2l/api/`, to a quiz's summary page or a closed dropbox's submission history to see whether you've handed it in, and to Crowdmark's student API if you connect it. It can't change anything on any site it reads.
+- It only sends GET requests: to your school's `/d2l/api/`, to a quiz's summary page or a closed dropbox's submission history to see whether you've handed it in, to a course's Content page when you import a course outline, and to Crowdmark's student API if you connect it. It can't change anything on any site it reads. A course outline is read into memory to pull out the dates, and the file is never saved.
 - Waterloo's Learn is the only site it can reach when you install it. Every other site is an optional permission your browser asks you about, and nothing is read from one until you say yes:
   - another school's Brightspace, if you pick that school instead of Waterloo. WATnow reads the same `/d2l/api/` routes on it.
   - Crowdmark, if you select **Connect Crowdmark**. It reads `app.crowdmark.com/api/v2/student/` for your courses and their assignment due dates. Disconnecting takes the permission away and its deadlines leave the panel on the next check.
@@ -97,6 +97,8 @@ This section is for developers. Most people should use the Chrome Web Store link
 **Firefox.** Either `npm install && npm run dev:ff`, which opens a clean profile with the extension loaded and reloads it as you edit, or go to `about:debugging#/runtime/this-firefox` and use **Load Temporary Add-on** on `extension/manifest.json`. Expect three manifest warnings there about the Chrome-only keys.
 
 **Packaging.** `npm run build:ff` and `npm run build:chrome` stage `dist/firefox` and `dist/chrome` with a manifest holding only that browser's keys ([`tools/pack.mjs`](tools/pack.mjs)) and zip them for the stores. `npm run lint:ff` runs `web-ext lint` over the staged Firefox build.
+
+**Vendored libraries.** `extension/vendor/pdfjs` holds the pdf.js files used to read a PDF course outline. After changing the `pdfjs-dist` version, run `npm run vendor:pdfjs` to refresh them.
 
 **Tests.** Run `npm install` once, then `npm test` runs the Node test suite (no build step). If your PowerShell refuses to run `npm` because the execution policy blocks its shim (`npm.ps1`), allow local scripts with `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, or skip npm and run the suite straight through Node with `node --test test/*.test.mjs`.
 

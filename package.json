@@ -7,6 +7,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test \"test/*.test.mjs\"",
+    "vendor:pdfjs": "node tools/vendor-pdfjs.mjs",
     "dev:ff": "web-ext run --source-dir extension --target firefox-desktop",
     "dev:nightly": "web-ext run --source-dir extension --target firefox-desktop --firefox nightly",
     "lint:ff": "node tools/pack.mjs firefox && web-ext lint --source-dir dist/firefox",
@@ -15,6 +16,7 @@
   },
   "devDependencies": {
     "ical.js": "^2.1.0",
+    "pdfjs-dist": "^6.4.299",
     "web-ext": "^8.5.0"
   }
 }

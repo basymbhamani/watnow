@@ -78,6 +78,11 @@ export function findOutlineTopics(toc) {
   return matches;
 }
 
+/** The content API path that serves a topic's file, used for a PDF outline. */
+function fileEndpoint(le, ou, topicId) {
+  return `/d2l/api/le/${le}/${ou}/content/topics/${topicId}/file`;
+}
+
 /** Absolute D2L URLs become relative paths so pageText can prefix the base. */
 function toRelativePath(url) {
   if (!url) return null;
@@ -194,8 +199,17 @@ export async function scanCourseOutline(source, course, existingItems = []) {
     }
   }
 
+  // No readable text: hand back the topic's file so the caller can try a PDF.
   if (!text) {
-    return { found: true, topic: topics[0], items: [], rawText: null, reason: "empty-content" };
+    const topic = topics[0];
+    return {
+      found: true,
+      topic,
+      items: [],
+      rawText: null,
+      reason: "empty-content",
+      filePath: fileEndpoint(le, ou, topic.topicId),
+    };
   }
 
   // 3. Parse candidates using deterministic parser
@@ -205,11 +219,15 @@ export async function scanCourseOutline(source, course, existingItems = []) {
     defaultYear: new Date().getFullYear(),
   });
 
+  const chosen = usedTopic || topics[0];
+  const readable = candidates.length > 0;
   return {
     found: true,
-    topic: usedTopic || topics[0],
+    topic: chosen,
     items: candidates,
     rawText: text,
-    reason: candidates.length ? null : "no-assessments",
+    reason: readable ? null : "no-assessments",
+    // Nothing parsed from the page text, so the topic may be a PDF to try.
+    filePath: readable ? null : fileEndpoint(le, ou, chosen.topicId),
   };
 }

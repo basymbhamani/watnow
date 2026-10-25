@@ -11,6 +11,7 @@ import { TESTER_BUILD } from "../src/core/build.js";
 import { pingPanelOpen } from "../src/core/usage.js";
 import { IS_GECKO } from "../src/core/env.js";
 import { crowdmarkAllowed, crowdmarkBase } from "../src/data/crowdmark-source.js";
+import { pdfBytesToText } from "../src/data/pdf-text.js";
 
 const APP = chrome.i18n.getMessage("appName") || "WATnow";
 const PREVIEW = new URLSearchParams(location.search).get("preview");
@@ -506,6 +507,50 @@ function closeOutlineModal() {
   renderOutlineModal();
 }
 
+/** Adds parsed items to the modal, skipping any id that is already listed. */
+function mergeOutlineCandidates(items) {
+  const seenIds = new Set(outlineModalState.candidates.map((c) => c.id));
+  for (const item of items) {
+    if (!seenIds.has(item.id)) {
+      outlineModalState.candidates.push({ ...item, selected: !item.isDuplicate });
+      seenIds.add(item.id);
+    }
+  }
+}
+
+/**
+ * Reads a PDF outline topic and turns its text into candidate items. The bytes
+ * are fetched into memory only and released after the text is read, so the PDF
+ * is never saved.
+ */
+async function handleOutlinePdf(filePath) {
+  outlineModalState.scanMessage = `Reading the outline PDF…`;
+  outlineModalState.pasting = false;
+  renderOutlineModal();
+
+  let text = "";
+  try {
+    const res = await fetch(`${liveBase(settings)}${filePath}`, { credentials: "include", headers: { Accept: "application/pdf" } });
+    if (!res.ok) throw new Error(`Learn returned ${res.status}`);
+    text = await pdfBytesToText(new Uint8Array(await res.arrayBuffer()));
+  } catch (e) {
+    outlineModalState.scanMessage = `Couldn't read the outline PDF. Open it, copy the schedule, and paste it below.`;
+    outlineModalState.pasting = true;
+    renderOutlineModal();
+    return;
+  }
+
+  const parsed = text && text.trim() ? await send("outline:parse-text", { text, courseId: outlineModalState.courseId }) : null;
+  if (parsed && parsed.ok && parsed.items && parsed.items.length) {
+    mergeOutlineCandidates(parsed.items);
+    outlineModalState.scanMessage = `Read ${parsed.items.length} item${parsed.items.length === 1 ? "" : "s"} from the outline PDF.`;
+  } else {
+    outlineModalState.scanMessage = `Read the outline PDF but found no dated in-person assessments. Open it, copy the table, and paste it below.`;
+    outlineModalState.pasting = true;
+  }
+  renderOutlineModal();
+}
+
 async function handleOutlineScan() {
   if (!outlineModalState.courseId) return;
   syncModalStateFromDOM();
@@ -522,6 +567,9 @@ async function handleOutlineScan() {
   } else if (res && res.reason === "signed-out") {
     outlineModalState.scanMessage = `Sign in to ${lms()} in this browser, then scan again. You can paste the outline text below meanwhile.`;
     outlineModalState.pasting = true;
+  } else if (res && res.found && !res.items?.length && res.filePath) {
+    await handleOutlinePdf(res.filePath);
+    return;
   } else if (res && res.found && !res.items?.length) {
     outlineModalState.scanMessage = `Found course outline on ${lms()}, but no new in-person assessments were detected. Paste the evaluation table below.`;
     outlineModalState.pasting = true;
@@ -548,13 +596,7 @@ async function handleOutlineParsePaste() {
       outlineModalState.scanMessage = "No dated assessments found in pasted text. Try pasting just the dates and assessment rows.";
     } else {
       outlineModalState.scanMessage = `Extracted ${res.items.length} assessment${res.items.length === 1 ? "" : "s"} from pasted text.`;
-      const seenIds = new Set(outlineModalState.candidates.map((c) => c.id));
-      for (const it of res.items) {
-        if (!seenIds.has(it.id)) {
-          outlineModalState.candidates.push({ ...it, selected: !it.isDuplicate });
-          seenIds.add(it.id);
-        }
-      }
+      mergeOutlineCandidates(res.items);
     }
   } else {
     outlineModalState.scanMessage = "Error parsing text.";
