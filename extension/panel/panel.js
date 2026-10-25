@@ -402,7 +402,7 @@ function renderOutlineModal() {
               ${c.location ? `<span class="outline-item-loc">${esc(c.location)}</span>` : ""}
               ${c.weight ? `<span class="outline-item-loc">(${esc(c.weight)})</span>` : ""}
             </div>
-            ${c.isDuplicate ? `<span class="outline-dup-badge">${icon("alert", 12)} Already on ${esc(lms())} (matches ${esc(c.duplicateOf || "item")})</span>` : ""}
+            ${c.isDuplicate ? `<span class="outline-dup-badge">${icon("alert", 12)} Already on ${esc(lms())} (matches ${esc(c.duplicateOfTitle || c.duplicateOf || "item")})</span>` : ""}
           </div>
         </div>`;
       }).join("")
@@ -519,11 +519,15 @@ async function handleOutlineScan() {
   if (res && res.ok && res.items && res.items.length) {
     outlineModalState.candidates = res.items.map((it) => ({ ...it, selected: !it.isDuplicate }));
     outlineModalState.scanMessage = `Found ${res.items.length} item${res.items.length === 1 ? "" : "s"} in course outline.`;
+  } else if (res && res.reason === "signed-out") {
+    outlineModalState.scanMessage = `Sign in to ${lms()} in this browser, then scan again. You can paste the outline text below meanwhile.`;
+    outlineModalState.pasting = true;
   } else if (res && res.found && !res.items?.length) {
     outlineModalState.scanMessage = `Found course outline on ${lms()}, but no new in-person assessments were detected. Paste the evaluation table below.`;
     outlineModalState.pasting = true;
   } else {
-    outlineModalState.scanMessage = `Couldn't extract text from ${lms()} outline automatically. Paste the evaluation table or schedule below.`;
+    const why = res && res.reason ? ` (${res.reason})` : "";
+    outlineModalState.scanMessage = `Couldn't extract text from ${lms()} outline automatically${why}. Paste the evaluation table or schedule below.`;
     outlineModalState.pasting = true;
   }
   renderOutlineModal();

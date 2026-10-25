@@ -2,6 +2,7 @@ dist/
 node_modules/
 .DS_Store
 
-# Course outline fixtures & downloads
-test/fixtures/outlines/
-*.pdf
+# Course outline fixtures: keep the text fixtures committed so the parser tests
+# run anywhere, but ignore downloaded binary copies (large, not needed).
+test/fixtures/outlines/*.pdf
+test/fixtures/outlines/*.docx

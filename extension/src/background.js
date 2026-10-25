@@ -532,6 +532,16 @@ async function readLive(source, epoch, { onCourses, onProgress, onCrowdmark, pre
 }
 
 /**
+ * Items the user added by hand (course-outline import, manual rows) are not
+ * produced by any Learn source, so a re-sync must never drop them.
+ */
+function isUserAddedItem(item) {
+  return Boolean(
+    item && (item.seenIn?.includes("outline") || item.source === "outline" || String(item.id || "").startsWith("outline:"))
+  );
+}
+
+/**
  * Compares a fresh read with what was stored. Keeps check-offs and marks
  * changed due dates as moved. A date that changed only because Learn now gives
  * it from a different field (DueDate removed, so the end date is used) is
@@ -578,8 +588,9 @@ function mergeLive(prevItems, fresh, { failed, readOk, courseIds }, now = new Da
   const freshIds = new Set(fresh.map((f) => f.id));
   for (const p of prevItems || []) {
     if (freshIds.has(p.id) || !courseIds.has(p.courseId)) continue;
-    if (p.seenIn?.includes("outline") || p.source === "outline") {
-      items.push(p);
+    if (isUserAddedItem(p)) {
+      const { missing, ...keep } = p;
+      items.push(keep);
       continue;
     }
     const ok = readOk.get(p.courseId);
@@ -1531,10 +1542,15 @@ async function handle(msg, sender) {
       const settings = await getSettings();
       const course = st.courses.find((c) => c.id === msg.courseId);
       if (!course) return { ok: false, reason: "Course not found" };
-      const source = createSource(settings, getCatalog, { relay: relayFetch });
       const existing = st.items.filter((i) => i.courseId === course.id);
-      const result = await scanCourseOutline(source, course, existing);
-      return { ok: true, ...result };
+      try {
+        const source = createSource(settings, getCatalog, { relay: relayFetch });
+        const result = await scanCourseOutline(source, course, existing);
+        return { ok: true, ...result };
+      } catch (e) {
+        const reason = e && e.code === "signed-out" ? "signed-out" : errorText(e);
+        return { ok: false, found: false, topic: null, items: [], rawText: null, reason };
+      }
     }
     case "outline:add-items": {
       const itemsToAdd = Array.isArray(msg.items) ? msg.items : [];

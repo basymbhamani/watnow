@@ -98,6 +98,8 @@ This section is for developers. Most people should use the Chrome Web Store link
 
 **Packaging.** `npm run build:ff` and `npm run build:chrome` stage `dist/firefox` and `dist/chrome` with a manifest holding only that browser's keys ([`tools/pack.mjs`](tools/pack.mjs)) and zip them for the stores. `npm run lint:ff` runs `web-ext lint` over the staged Firefox build.
 
+**Tests.** Run `npm install` once, then `npm test` runs the Node test suite (no build step). If your PowerShell refuses to run `npm` because the execution policy blocks its shim (`npm.ps1`), allow local scripts with `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, or skip npm and run the suite straight through Node with `node --test test/*.test.mjs`.
+
 For Google Calendar setup, account access and developer notes, see the [Google Calendar README](extension/src/calendar/README.md).
 
 ---

@@ -130,6 +130,7 @@
 */
 
 import { currentSchool } from "../core/schools.js";
+import { htmlToLines, htmlToText } from "./html-text.js";
 
 export const LEARN_BASE = "https://learn.uwaterloo.ca";
 
@@ -1179,10 +1180,10 @@ export class LiveSource {
   }
 
   /**
-   * One of Learn's own pages as plain text, or null when it can't be read.
+   * The HTML of one of Learn's own pages, or null when it can't be read.
    * Only the worker reads pages; a tab relay only carries /d2l/api/ requests.
    */
-  async pageText(path, via = this.via || "worker") {
+  async pageSource(path, via = this.via || "worker") {
     if (via !== "worker") return null;
     const gap = GAP_MS - (Date.now() - this.lastAt);
     if (gap > 0) await wait(gap);
@@ -1208,7 +1209,26 @@ export class LiveSource {
       entry.error = "network";
       return null;
     }
-    return text.replace(/<[^>]*>/g, " ").replace(/&nbsp;|&#160;/g, " ").replace(/\s+/g, " ");
+    return text;
+  }
+
+  /**
+   * One of Learn's own pages as plain text on a single line, or null when it
+   * can't be read. Use this for a "is this phrase on the page" check.
+   */
+  async pageText(path, via = this.via || "worker") {
+    const html = await this.pageSource(path, via);
+    return html == null ? null : htmlToText(html);
+  }
+
+  /**
+   * One of Learn's own pages as plain text with its block structure kept: each
+   * paragraph, table row, and list item becomes its own line. Use this when the
+   * layout matters, for example a course outline read row by row.
+   */
+  async pageRows(path, via = this.via || "worker") {
+    const html = await this.pageSource(path, via);
+    return html == null ? null : htmlToLines(html);
   }
 
   /**

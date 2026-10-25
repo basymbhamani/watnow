@@ -37,6 +37,16 @@ const ASSESSMENT_KW_RE = /\b(midterm(?:\s+(?:exam|examination|test))?|term\s+tes
 const LOCATION_RE = /\b(?:in[-\s]+(?:class|person|[A-Z]{2,4}\s*\d{2,4}[A-Z]?))\b/i;
 const WEIGHT_RE = /\b(\d{1,2})\s*%/;
 
+// A line longer than this holds more than one assessment row. The page reader
+// normally gives one line per block, but a single-paragraph outline arrives as
+// one long line, so split it on sentence ends before looking for rows.
+const MAX_LINE = 300;
+
+function splitLongLine(line) {
+  if (line.length <= MAX_LINE) return [line];
+  return String(line).split(/(?<=[.;])\s+(?=[A-Z0-9(])/);
+}
+
 /**
  * Determines category from title to match WATnow's categories:
  * "assignment", "lab", "quiz", "discussion", "content".
@@ -126,12 +136,41 @@ function toIsoDate(year, month, day, hour, minute) {
 
 export function toLocalDay(iso) {
   if (!iso) return null;
-  const d = new Date(iso);
+  const s = String(iso).trim();
+  // A bare calendar date ("2026-10-11") carries no time or zone. Read it as
+  // written: Date() would parse it as UTC midnight and, west of UTC, hand back
+  // the day before. This keeps date-only values stable on every machine.
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (dateOnly) return `${dateOnly[1]}-${dateOnly[2]}-${dateOnly[3]}`;
+  const d = new Date(s);
   if (isNaN(d.getTime())) return null;
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+/**
+ * True when `needle` sits inside `haystack` as a run of whole words. Both are
+ * already-normalized, single-space-separated strings. Whole-word matching stops
+ * a short stem like "term 1" from matching "midterm 1".
+ */
+function containsTokenRun(haystack, needle) {
+  if (!haystack || !needle) return false;
+  const h = haystack.split(" ");
+  const n = needle.split(" ");
+  if (n.length > h.length) return false;
+  for (let i = 0; i + n.length <= h.length; i++) {
+    let hit = true;
+    for (let j = 0; j < n.length; j++) {
+      if (h[i + j] !== n[j]) {
+        hit = false;
+        break;
+      }
+    }
+    if (hit) return true;
+  }
+  return false;
 }
 
 /**
@@ -146,6 +185,9 @@ export function isDuplicateItem(candidate, existingItems = []) {
     const normExisting = normalizeTitle(ex.title);
     const exDate = toLocalDay(ex.dueAt);
     const numEx = (normExisting.match(/\b\d+\b/) || [])[0];
+    // `duplicateOf` is the stable id so callers can link back to the item;
+    // `duplicateOfTitle` is the human label for the panel.
+    const match = { isDuplicate: true, duplicateOf: ex.id || ex.title || null, duplicateOfTitle: ex.title || ex.id || null };
 
     // If both have explicit item numbers and they differ (e.g. "1" vs "2"), they are different items
     if (numCand && numEx && numCand !== numEx) {
@@ -154,15 +196,15 @@ export function isDuplicateItem(candidate, existingItems = []) {
 
     // Rule 1: Exact normalized title match (e.g. "midterm 1" === "midterm 1")
     if (normCandidate && normExisting && normCandidate === normExisting) {
-      return { isDuplicate: true, duplicateOf: ex.title || ex.id, reason: "title_match" };
+      return { ...match, reason: "title_match" };
     }
 
-    // Rule 2: Title substring match only if item numbers agree (or both absent)
-    // and dates are not conflicting on different days
+    // Rule 2: One title is a whole-word run inside the other, only if item
+    // numbers agree (or both absent) and dates do not conflict across days
     if (normCandidate && normExisting && numCand === numEx) {
-      if (normCandidate.includes(normExisting) || normExisting.includes(normCandidate)) {
+      if (containsTokenRun(normCandidate, normExisting) || containsTokenRun(normExisting, normCandidate)) {
         if (!candDate || !exDate || candDate === exDate) {
-          return { isDuplicate: true, duplicateOf: ex.title || ex.id, reason: "title_match" };
+          return { ...match, reason: "title_match" };
         }
       }
     }
@@ -172,12 +214,12 @@ export function isDuplicateItem(candidate, existingItems = []) {
       const isTestA = /\b(?:test|midterm|exam|quiz)\b/i.test(candidate.title);
       const isTestB = /\b(?:test|midterm|exam|quiz)\b/i.test(ex.title);
       if (isTestA && isTestB) {
-        return { isDuplicate: true, duplicateOf: ex.title || ex.id, reason: "same_day_assessment" };
+        return { ...match, reason: "same_day_assessment" };
       }
     }
   }
 
-  return { isDuplicate: false, duplicateOf: null, reason: null };
+  return { isDuplicate: false, duplicateOf: null, duplicateOfTitle: null, reason: null };
 }
 
 /**
@@ -196,7 +238,8 @@ export function parseOutline(text, options = {}) {
 
   // Strip HTML tags if HTML is provided
   const plainText = text.replace(/<[^>]+>/g, " ");
-  const lines = plainText.split(/\r?\n/);
+  const lines = [];
+  for (const line of plainText.split(/\r?\n/)) lines.push(...splitLongLine(line));
   const candidates = [];
 
   for (let i = 0; i < lines.length; i++) {
@@ -313,6 +356,7 @@ export function parseOutline(text, options = {}) {
     const dup = isDuplicateItem(candidateItem, existingItems);
     candidateItem.isDuplicate = dup.isDuplicate;
     candidateItem.duplicateOf = dup.duplicateOf;
+    candidateItem.duplicateOfTitle = dup.duplicateOfTitle;
     candidateItem.duplicateReason = dup.reason;
 
     return candidateItem;

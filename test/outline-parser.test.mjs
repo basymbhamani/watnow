@@ -40,6 +40,19 @@ describe("Title Normalization", () => {
   });
 });
 
+describe("Day extraction", () => {
+  test("reads a bare calendar date as written, with no timezone shift", () => {
+    assert.equal(toLocalDay("2026-10-11"), "2026-10-11");
+    assert.equal(toLocalDay("2026-01-01"), "2026-01-01");
+  });
+
+  test("returns null for empty or unparseable input", () => {
+    assert.equal(toLocalDay(""), null);
+    assert.equal(toLocalDay(null), null);
+    assert.equal(toLocalDay("not a date"), null);
+  });
+});
+
 describe("Parsing Real Outline Assessment Snippets", () => {
   test("Guelph MCS*3030: extracts midterm date from table, ignores D2L assignments and TBA final", () => {
     const text = `
@@ -126,6 +139,19 @@ Final Exam 30% To be Announced
     const items = parseOutline(text, { course: COURSE, defaultYear: 2026 });
     assert.equal(items.length, 2);
     assert.equal(items.some((i) => i.title.includes("Final")), false);
+  });
+});
+
+describe("Long single-paragraph pages", () => {
+  test("splits one long line on sentence ends so each row keeps its own date", () => {
+    const filler = "The evaluation below is subject to change. ".repeat(8); // pushes the line past 300 chars
+    const text = `${filler}Survey Assignment October 4, 2026 15%. Midterm Examination October 11, 2026 20%. Final Examination Refer to WebAdvisor 25%.`;
+    assert.ok(text.length > 300, "the line must be over the cap to exercise the split");
+    const items = parseOutline(text, { course: COURSE, defaultYear: 2026 });
+    const midterm = items.find((i) => i.title.includes("Midterm"));
+    assert.ok(midterm, "Midterm should be found after the split");
+    assert.equal(toLocalDay(midterm.dueAt), "2026-10-11");
+    assert.equal(items.some((i) => i.title.includes("Final")), false, "TBA final should be skipped");
   });
 });
 
